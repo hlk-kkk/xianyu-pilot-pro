@@ -1,0 +1,57 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>个人信息保护政策审阅稿｜闲鱼助手</title><style>
+:root{color-scheme:light;--ink:#202a36;--muted:#637083;--line:#dbe2e9;--accent:#2563a6;--notice:#fff7dc;--notice-line:#dfa323}*{box-sizing:border-box}body{margin:0;background:#f3f6f8;color:var(--ink);font:16px/1.75 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}.wrap{max-width:940px;margin:40px auto;padding:0 20px}.doc{background:#fff;border:1px solid var(--line);border-radius:16px;padding:clamp(24px,5vw,64px);box-shadow:0 12px 36px rgba(22,42,64,.06)}.status{padding:16px 18px;border:1px solid var(--notice-line);border-left-width:5px;border-radius:8px;background:var(--notice);font-weight:650;margin-bottom:30px}h1{font-size:clamp(28px,4vw,38px);line-height:1.25;letter-spacing:-.02em;margin:0 0 28px}h2{font-size:23px;margin:38px 0 12px;padding-top:12px;border-top:1px solid var(--line)}h3{font-size:18px;margin:26px 0 10px}p{margin:10px 0}a{color:var(--accent)}ul,ol{padding-left:26px}li{margin:6px 0}blockquote{margin:14px 0;padding:14px 18px;background:#f4f7fa;border-left:3px solid #90a4b7;color:#405367;border-radius:4px}.table-wrap{overflow-x:auto;margin:18px 0}table{width:100%;border-collapse:collapse;min-width:640px;font-size:14px}th,td{padding:10px 12px;text-align:left;vertical-align:top;border:1px solid var(--line)}th{background:#f3f6f8;font-weight:650}hr{border:0;border-top:1px solid var(--line);margin:32px 0}code{padding:2px 5px;background:#edf1f5;border-radius:4px;font-size:.9em}.check{color:#9a6b00;font-size:1.15em;padding-right:4px}.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);font-size:13px;color:var(--muted)}@media(max-width:640px){.wrap{margin:0 auto;padding:0}.doc{border-radius:0;border-width:0;padding:24px 20px}body{font-size:15px}}
+</style></head><body><main class="wrap"><article class="doc"><div class="status">内部审阅稿 · 尚未生效。文内待填写项未核实前，请勿作为正式协议或隐私政策使用。</div><h1>闲鱼助手个人信息保护政策（内部审阅稿）</h1>
+<blockquote><strong>状态：待业务、部署主体及法律顾问审阅；不是已生效政策。</strong> 本文包含待填写项及按功能启用时才适用的内容。当前部署是本地 Docker 环境；运营主体、实际服务器位置、已启用的外部服务和数据保留期限尚未核实。请勿将本稿直接配置到登录页，也不要据此收集用户同意。<br>版本：0.1（2026-10-22）  <br>服务名称：闲鱼助手（xianyu-pilot-pro）  <br>个人信息处理者：【必须填写真实主体全称、地址及联系方式；自托管场景下需明确由谁决定处理目的和方式】  <br>隐私联系人：【必须填写专用邮箱/电话】  <br>生效日期：【待确定】</blockquote>
+<h2>1. 适用范围与基本原则</h2>
+<p>本政策说明你使用闲鱼助手网站及其后台功能时，相关个人信息可能如何被处理。不同部署方可能自行选择功能、AI 服务、邮件服务、数据库位置和保留方式，因此部署方必须根据实际配置替换本稿中的条件说明，并对实际处理活动负责。</p>
+<p>我们按照合法、正当、必要和诚信原则处理个人信息，仅在明确目的和必要范围内处理，并依法采取保护措施。适用法律要求单独同意或其他特定授权的，需在功能启用前另行说明并取得相应授权。</p>
+<h2>2. 可能处理的信息、目的与方式</h2>
+<p>以下为代码功能及部署形态所涉及的信息类别；具体字段、是否启用和保存期限需由部署方逐项核实。</p>
+<div class="table-wrap"><table><thead><tr><th>信息类别</th><th>可能包括</th><th>目的/触发条件</th></tr></thead><tbody>
+<tr><td>注册与账号资料</td><td>登录名、密码验证信息、昵称、手机号、邮箱、头像、租户/组织标识、账号状态</td><td>创建和维护账号、身份验证、提供多租户服务与客户支持。密码应以不可逆哈希形式验证；不得在日志或明文导出中暴露密码。</td></tr>
+<tr><td>登录与安全记录</td><td>登录时间、登录 IP、验证码/安全验证结果、会话与错误诊断信息</td><td>登录、防止滥用、排查故障和保障账号安全。实际记录字段、访问权限和保存期限：【部署方核实】。</td></tr>
+<tr><td>业务与用户内容</td><td>你提交的商品资料、图片、订单、会话/消息内容、自动回复和工作流配置</td><td>在你主动启用相关模块时提供查询、运营和自动化功能。仅处理该功能所需的数据。</td></tr>
+<tr><td>已连接的第三方账号资料</td><td>账号标识、昵称、头像及你授权提交的 Cookie/令牌等认证凭据</td><td>在你明确连接账号并启用相关功能后，用于访问你授权的第三方平台功能。不要连接无权使用的账号。</td></tr>
+<tr><td>交易、会员及使用记录</td><td>订阅/套餐、余额、功能使用、操作审计等记录</td><td>提供服务、计费（如适用）、风控、审计和处理争议。实际启用范围：【部署方核实】。</td></tr>
+<tr><td>设备与网络信息</td><td>IP 地址、浏览器/设备基本信息、访问时间、必要的诊断信息</td><td>安全防护、兼容性处理、故障诊断。部署方应核实访问日志是否收集此类信息。</td></tr>
+<tr><td>客服与反馈</td><td>你主动提交的联系方式、问题描述、附件及沟通内容</td><td>响应咨询、处理投诉和修复问题。</td></tr>
+</tbody></table></div>
+<p>我们通过网页表单、服务接口、你主动连接的第三方账号、系统日志及部署方配置的服务收集或生成上述信息。除法律允许的情形外，不从无关渠道收集个人信息。</p>
+<h2>3. 第三方提供与委托处理</h2>
+<p>只有在实际部署启用相关功能时，相关信息才可能传给下列服务。上线前必须填入真实服务商名称、接收字段、目的、保存期限及其隐私政策，并在适用法律要求时告知并取得单独同意。</p>
+<div class="table-wrap"><table><thead><tr><th>接收方/类型</th><th>可能涉及的功能</th><th>部署方必须核实</th></tr></thead><tbody>
+<tr><td>闲鱼或其他你主动连接的平台</td><td>读取或提交商品、订单、消息及账号认证信息</td><td>平台名称、数据字段、接口方式、账号授权和平台规则。</td></tr>
+<tr><td>AI 模型服务商（若启用）</td><td>对你提交的提示词、文本、图片或业务内容进行生成/分析</td><td>供应商名称、发送字段、是否用于训练、保存期限、处理地点及跨境情况；向用户提供关闭或选择机制。</td></tr>
+<tr><td>验证码、邮件、短信或通知服务（若启用）</td><td>安全验证、发送验证码或业务通知</td><td>服务商名称、接收字段、用途、保存期限及通信渠道。</td></tr>
+<tr><td>部署方自选的存储、监控或运维服务（若启用）</td><td>数据库存储、备份、日志与故障处理</td><td>服务商名称、服务器地区、人员访问权限、备份与删除周期。</td></tr>
+</tbody></table></div>
+<p>除上表所列且部署方确认的情形外，未核实是否存在其他第三方接收方。请部署方检查代码、容器环境变量、反向代理、外部 API、备份和运维工具后补全本节。不得以“可能共享”等笼统表述替代具体告知。</p>
+<h2>4. 存储地点、期限与安全措施</h2>
+<p>当前本地 Docker 部署使用本机服务和数据库容器；本机卷、备份、远程访问和外部 API 的实际位置由部署方配置决定。生产部署地点：【必须填写国家/地区及服务商】。</p>
+<p>个人信息仅在实现目的所必要的期限内保存，法律法规另有规定或争议处理需要保留的除外。各类别保存期限：【必须由部署方分别填写账号资料、业务数据、日志、备份和客服记录期限】。到期后删除或匿名化；备份中的数据按经核实的备份轮换周期清理。</p>
+<p>软件具备用户密码哈希校验及第三方账号 Cookie AES-GCM 加密能力，但部署方必须设置强且独立的加密密钥，并确认历史明文数据、备份、日志和密钥轮换方式。具体安全措施、管理员权限、访问审计、漏洞响应和事件通知渠道：【部署方核实并填写】。不得把开发默认密钥或“有加密功能”作为生产安全保证。</p>
+<h2>5. 个人信息权利及行使方式</h2>
+<p>在适用法律规定的范围内，你可以请求查询、复制、更正、补充、删除个人信息，撤回同意，注销账号，限制或拒绝某些处理，并询问个人信息处理规则。法律另有规定或技术上无法实现时，可能依法处理。</p>
+<p>请通过【隐私联系人邮箱/电话】提交申请。为保护账号安全，我们可能核验申请人身份，并在法定期限内答复。账号注销、删除后的备份清理时间及例外：【部署方填写】。</p>
+<h2>6. 敏感个人信息与单独同意</h2>
+<p>第三方账号认证凭据、私信内容、交易信息等可能带来较高风险。部署方应逐项评估其是否构成敏感个人信息，说明处理的特定目的、充分必要性及对个人权益的影响，并依法取得单独同意或其他必要授权。相关功能必须提供必要的权限控制和适当的关闭/撤回机制。</p>
+<h2>7. 跨境处理</h2>
+<p>部署方尚未核实是否有个人信息或业务内容被传输、存储或远程访问于中国大陆以外地区。若启用境外 AI、云存储、监控或运维服务，部署方应明确接收方、目的、方式、信息种类和保存期限，并依法完成告知、单独同意及适用的跨境合规程序。否则应停用相关跨境传输。</p>
+<h2>8. 未成年人信息</h2>
+<p>本服务是否面向未成年人：【必须由部署方确定】。如处理不满十四周岁未成年人的个人信息，应制定专门规则并依法取得监护人同意。未成年人保护联系渠道：【填写】。</p>
+<h2>9. 政策变更、投诉与联系</h2>
+<p>政策发生重大变更时，部署方应以适当方式告知，并依法取得必要同意。历史版本应留存，以便用户查阅。</p>
+<p>个人信息处理者：【主体全称】 联系地址：【填写】 隐私联系人及投诉渠道：【填写邮箱/电话】 答复时限与申诉渠道：【部署方核实并填写】</p>
+<hr>
+<h2>上线前审阅清单（未完成前不得作为正式政策使用）</h2>
+<ul>
+<li><span class="check">□</span> 确定本地部署或 SaaS 场景下的个人信息处理者和实际运营主体。</li>
+<li><span class="check">□</span> 盘点实际收集字段、账号 Cookie/令牌、日志、备份和各项功能开关。</li>
+<li><span class="check">□</span> 按实际情况填写所有第三方接收方、目的、数据类别、保存期限及处理地区。</li>
+<li><span class="check">□</span> 核实 AI 功能是否发送用户内容、供应商是否保留或训练使用、是否涉及跨境。</li>
+<li><span class="check">□</span> 设置并核实 Cookie 加密密钥；排查数据库、日志、备份中的历史明文凭据。</li>
+<li><span class="check">□</span> 明确各类数据保留、删除、注销及备份轮换周期。</li>
+<li><span class="check">□</span> 建立查询、更正、删除、撤回同意、注销、投诉和事件通知流程。</li>
+<li><span class="check">□</span> 评估敏感个人信息、未成年人信息、第三方账号数据及单独同意要求。</li>
+<li><span class="check">□</span> 由法律顾问按真实处理活动审核后，发布正式版本并记录版本与同意情况。</li>
+</ul><div class="foot">文档供当前部署者审阅，正式发布前应根据实际运营主体和数据处理情况修订。</div></article></main></body></html>

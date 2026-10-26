@@ -223,7 +223,7 @@ public class OpenSourceBridgeClient {
     private String ensureInstanceToken() {
         try {
             // 尝试读取已有token
-            String sql = "SELECT setting_value FROM xianyu_sys_setting WHERE setting_key = ? AND deleted = 0 LIMIT 1";
+            String sql = "SELECT setting_value FROM xianyu_sys_setting WHERE setting_key = ? ORDER BY id DESC LIMIT 1";
             try {
                 String existing = jdbcTemplate.queryForObject(sql, String.class, INSTANCE_TOKEN_SETTING_KEY);
                 if (existing != null && !existing.isBlank() && existing.startsWith(INSTANCE_TOKEN_PREFIX)) {
@@ -239,9 +239,9 @@ public class OpenSourceBridgeClient {
             // 存储到数据库
             try {
                 jdbcTemplate.update(
-                        "INSERT INTO xianyu_sys_setting(setting_key, setting_value, description, created_time, updated_time, deleted) " +
-                                "VALUES(?, ?, ?, NOW(), NOW(), 0) ON DUPLICATE KEY UPDATE setting_value=VALUES(setting_value), updated_time=NOW()",
-                        INSTANCE_TOKEN_SETTING_KEY, token, "开源部署实例标识，用于商业版桥接数据归属"
+                        "INSERT INTO xianyu_sys_setting(setting_key, setting_value, created_time, updated_time) " +
+                                "VALUES(?, ?, NOW(), NOW())",
+                        INSTANCE_TOKEN_SETTING_KEY, token
                 );
             } catch (Exception e) {
                 logger.warn("persist instance token failed, using in-memory token: {}", e.getClass().getSimpleName());

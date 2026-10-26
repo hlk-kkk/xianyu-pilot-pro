@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.61.1-noble AS build
+FROM node:24.18.0-bookworm AS build
 
 WORKDIR /app
 
@@ -13,11 +13,16 @@ COPY migrations ./migrations
 
 RUN npm run build && npm prune --omit=dev --no-audit --strict-allow-scripts
 
-FROM mcr.microsoft.com/playwright:v1.61.1-noble
+FROM node:24.18.0-bookworm
 
 WORKDIR /app
 
-RUN test "$(node --version)" = "v24.18.0" \
+# 保留 Playwright 官方镜像使用的非 root 运行用户，确保 Chrome profile / HOME 可写。
+RUN groupadd --gid 10001 pwuser \
+    && useradd --uid 10001 --gid pwuser --create-home --shell /usr/sbin/nologin pwuser
+
+RUN npm install --global npm@11.16.0 \
+    && test "$(node --version)" = "v24.18.0" \
     && test "$(npm --version)" = "11.16.0"
 
 # 安装 Xvfb + google-chrome-stable + Python + patchright：
@@ -28,15 +33,38 @@ RUN test "$(node --version)" = "v24.18.0" \
 # - python3 + patchright：商机发掘搜索的 Python 兜底脚本（goofishSearch.py）依赖 patchright
 #   反检测分支（自动清理 CDP 痕迹），是 Node Playwright 触发 Baxia 风控后的关键兜底。
 #   注意：仅用于商机发掘搜索（goofishSearch.ts），不影响滑块求解（sliderSolver.ts 仍走 Node Playwright）。
-RUN wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb -O /tmp/chrome.deb && \
-    apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's|http://deb.debian.org/debian|https://mirrors.tuna.tsinghua.edu.cn/debian|g; s|http://deb.debian.org/debian-security|https://mirrors.tuna.tsinghua.edu.cn/debian-security|g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::Timeout=30 update \
+    && apt-get -o Acquire::Retries=5 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
         xvfb \
         xauth \
         xdotool \
         python3 \
         python3-pip \
         python3-venv \
-        /tmp/chrome.deb \
+        curl \
+        ca-certificates \
+        fonts-liberation \
+        libasound2 \
+        libatk-bridge2.0-0 \
+        libatk1.0-0 \
+        libatspi2.0-0 \
+        libcups2 \
+        libdbus-1-3 \
+        libdrm2 \
+        libgbm1 \
+        libgtk-3-0 \
+        libnspr4 \
+        libnss3 \
+        libxcomposite1 \
+        libxdamage1 \
+        libxfixes3 \
+        libxkbcommon0 \
+        libxrandr2 \
+    && curl --fail --location --show-error --retry 3 --connect-timeout 20 --max-time 300 \
+        https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
+        --output /tmp/chrome.deb \
+    && apt-get install -y --no-install-recommends /tmp/chrome.deb \
     && rm -rf /var/lib/apt/lists/* /tmp/chrome.deb \
     && python3 -m pip install --no-cache-dir --break-system-packages \
         -i https://pypi.tuna.tsinghua.edu.cn/simple \

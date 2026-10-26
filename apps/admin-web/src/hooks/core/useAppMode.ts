@@ -19,7 +19,10 @@ import { computed } from 'vue'
 
 export function useAppMode() {
   // 获取访问模式配置
-  const accessMode = import.meta.env.VITE_ACCESS_MODE
+  // The open-source backend intentionally leaves dynamic menu APIs disabled.
+  // Default to the bundled asyncRoutes unless a deployment explicitly opts in
+  // to backend-controlled routing.
+  const accessMode = import.meta.env.VITE_ACCESS_MODE || 'frontend'
 
   /**
    * 是否为前端控制模式

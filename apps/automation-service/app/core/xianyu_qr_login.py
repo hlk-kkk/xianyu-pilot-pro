@@ -54,6 +54,7 @@ H_API = {
 
 POLL_INTERVAL = 0.8
 SESSION_TIMEOUT = 300  # 5 分钟
+MAX_QR_RESPONSE_KEY_PATHS = 300
 
 # 上海时区 UTC+8
 SHANGHAI_TZ = timezone(timedelta(hours=8))
@@ -77,6 +78,29 @@ def _json_or_raise(resp: requests.Response, stage: str) -> dict:
         return resp.json()
     except ValueError as exc:
         raise RuntimeError(f"{stage} 响应解析失败") from exc
+
+
+def _json_key_paths(value, prefix: str = "", *, max_paths: int = MAX_QR_RESPONSE_KEY_PATHS) -> list[str]:
+    """仅收集 JSON 对象的字段路径用于诊断，绝不读取或记录字段值。"""
+    paths: list[str] = []
+
+    def visit(node, path: str, depth: int) -> None:
+        if len(paths) >= max_paths or depth > 10:
+            return
+        if isinstance(node, dict):
+            for key, child in node.items():
+                child_path = f"{path}.{key}" if path else str(key)
+                paths.append(child_path)
+                if len(paths) >= max_paths:
+                    return
+                visit(child, child_path, depth + 1)
+        elif isinstance(node, list):
+            # Schema paths are represented with [*], so values and array size stay private.
+            if node:
+                visit(node[0], f"{path}[*]", depth + 1)
+
+    visit(value, prefix, 0)
+    return paths
 
 
 # ==================== 会话管理 ====================
@@ -256,6 +280,10 @@ def _collect_session_cookies(session: requests.Session, resp: requests.Response)
             len({k: v for k, v in session.cookies.items()}), len(cookies),
         )
 
+    # Field names help compare the newly returned session with the saved cookie.
+    # Cookie values are credentials and must never be written to logs.
+    logger.info("扫码登录 CONFIRMED: Cookie 字段名 keys=%s", sorted(cookies.keys()))
+
     # 关键字段存在性检查（用于诊断登录态完整性）
     critical_keys = ("havana_lgc2_77", "_hvn_lgc_", "havana_lgc_exp", "unb", "_m_h5_tk")
     missing_critical = [k for k in critical_keys if k not in cookies]
@@ -279,6 +307,7 @@ def _poll_status(session: requests.Session, login_form: dict, timeout: int = SES
         status = data["qrCodeStatus"]
 
         if status == "CONFIRMED":
+            logger.info("扫码登录 CONFIRMED: 响应 JSON 字段路径=%s", _json_key_paths(data))
             if data.get("iframeRedirect"):
                 return {"status": "verification_required", "iframe_redirect_url": data.get("iframeRedirectUrl")}
             # 收集 Cookie：同时从 session.cookies 和响应头 Set-Cookie 合并，避免丢失登录态字段
@@ -304,6 +333,7 @@ def _poll_status_once(session: requests.Session, login_form: dict) -> dict:
         status = data["qrCodeStatus"]
 
         if status == "CONFIRMED":
+            logger.info("扫码登录 CONFIRMED: 响应 JSON 字段路径=%s", _json_key_paths(data))
             if data.get("iframeRedirect"):
                 return {"status": "verification_required", "iframe_redirect_url": data.get("iframeRedirectUrl")}
             # 收集 Cookie：同时从 session.cookies 和响应头 Set-Cookie 合并，避免丢失登录态字段

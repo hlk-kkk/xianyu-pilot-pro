@@ -791,7 +791,13 @@ async def publish_item(
 
         # 分类（优先用类目推荐 API，这里传参作为手动回退用）
         category = req.get("category", "")
-        if category:
+        if isinstance(category, dict):
+            item_data["category"] = {
+                key: str(category.get(key) or "")
+                for key in ("catName", "catId", "channelCatId", "tbCatId")
+                if category.get(key) is not None
+            }
+        elif category:
             item_data["category"] = {"catName": category}
 
         # 位置信息（来自前端省、市、区地址字典选择）

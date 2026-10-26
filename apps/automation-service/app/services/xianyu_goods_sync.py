@@ -3292,7 +3292,11 @@ class XianyuItemPublisher:
         logger.info("Step 1/3: 类目推荐 titleLen=%d", len(title))
         recommend_result = self.category_recommend(title, desc, image_urls)
 
-        if recommend_result.get("recommended"):
+        # A recommendation response can be transport-successful while containing
+        # no usable category IDs. In that case use the user's explicit category
+        # (including IDs copied from an already-synced item) instead of the stale
+        # hard-coded default category.
+        if recommend_result.get("recommended") and recommend_result.get("catId"):
             category_info = recommend_result
             logger.info("类目推荐成功: %s (catId=%s)", category_info["catName"], category_info["catId"])
         else:

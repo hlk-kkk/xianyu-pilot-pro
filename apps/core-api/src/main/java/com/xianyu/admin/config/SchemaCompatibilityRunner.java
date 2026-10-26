@@ -64,6 +64,7 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
         ensureRateTables();
         ensureRefundTables();
         ensureGrowthTables();
+        ensureChinaAddressDictTable();
         ensureCompatibilityColumns();
         backfillCompatibilityData();
         if (!failures.isEmpty()) {
@@ -73,6 +74,35 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
             );
         }
         log.info("SchemaCompatibilityRunner: done runtimeMutationsEnabled={}", runtimeMutationsEnabled);
+    }
+
+    /** V1.12 address dictionary table; the Flyway migration may be absent in local legacy databases. */
+    private void ensureChinaAddressDictTable() {
+        createTable("""
+                CREATE TABLE IF NOT EXISTS china_address_dict (
+                    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                    adcode VARCHAR(12) NOT NULL,
+                    prov VARCHAR(50) NOT NULL DEFAULT '',
+                    city VARCHAR(50) NOT NULL DEFAULT '',
+                    area VARCHAR(50) NOT NULL DEFAULT '',
+                    full_name VARCHAR(200) NOT NULL DEFAULT '',
+                    division_id VARCHAR(20) NOT NULL DEFAULT '',
+                    gps VARCHAR(40) NOT NULL DEFAULT '',
+                    gps_center VARCHAR(40) NOT NULL DEFAULT '',
+                    poi_id VARCHAR(40) NOT NULL DEFAULT '',
+                    poi_name VARCHAR(200) NOT NULL DEFAULT '',
+                    detail VARCHAR(300) NOT NULL DEFAULT '',
+                    sync_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    error_msg VARCHAR(500) NOT NULL DEFAULT '',
+                    retry_count INT NOT NULL DEFAULT 0,
+                    created_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    updated_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    UNIQUE KEY uk_cad_adcode (adcode),
+                    INDEX idx_cad_prov_city (prov, city),
+                    INDEX idx_cad_sync_status (sync_status),
+                    INDEX idx_cad_full_name (full_name)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+                """, "china_address_dict");
     }
 
     private void ensureSecurityTables() {
@@ -893,6 +923,15 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
                     updated_time DATETIME,
                     deleted TINYINT DEFAULT 0,
                     period_type VARCHAR(10) DEFAULT NULL COMMENT 'VIP订单计费周期：month/quarter/year；NULL 视为 month（兼容历史订单）',
+                    activity_id BIGINT NULL,
+                    activity_plan_id BIGINT NULL,
+                    activity_name VARCHAR(100) NULL,
+                    original_price_cent BIGINT NULL,
+                    activity_price_cent BIGINT NULL,
+                    discount_cent BIGINT NOT NULL DEFAULT 0,
+                    is_activity_order TINYINT NOT NULL DEFAULT 0,
+                    quota_preoccupied TINYINT NOT NULL DEFAULT 0,
+                    activity_rule_version INT NULL,
                     UNIQUE KEY uk_payment_order_gateway_trade(out_trade_no),
                     INDEX idx_payment_order_user(user_id, created_time),
                     INDEX idx_payment_order_status(status),
@@ -2169,6 +2208,9 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
             "JSON NULL COMMENT '关键词规则数组，用于检索时分类预过滤'");
         addColumnIfMissing("ai_cs_kb_category", "is_system",
             "TINYINT NOT NULL DEFAULT 0 COMMENT '1=预定义不可删，0=可删'");
+        addColumnIfMissing("ai_cs_kb_category", "icon", "VARCHAR(64) NULL");
+        addColumnIfMissing("ai_cs_kb_category", "color", "VARCHAR(24) NULL");
+        addColumnIfMissing("ai_cs_kb_category", "description", "TEXT NULL");
 
         // 2. ai_cs_learned_kb 扩展字段
         addColumnIfMissing("ai_cs_learned_kb", "conversation_turn_count",
@@ -3139,6 +3181,15 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
         addColumnIfMissing("payment_order", "updated_time", "DATETIME NULL");
         addColumnIfMissing("payment_order", "deleted", "TINYINT DEFAULT 0");
         addColumnIfMissing("payment_order", "period_type", "VARCHAR(10) NULL");
+        addColumnIfMissing("payment_order", "activity_id", "BIGINT NULL");
+        addColumnIfMissing("payment_order", "activity_plan_id", "BIGINT NULL");
+        addColumnIfMissing("payment_order", "activity_name", "VARCHAR(100) NULL");
+        addColumnIfMissing("payment_order", "original_price_cent", "BIGINT NULL");
+        addColumnIfMissing("payment_order", "activity_price_cent", "BIGINT NULL");
+        addColumnIfMissing("payment_order", "discount_cent", "BIGINT NOT NULL DEFAULT 0");
+        addColumnIfMissing("payment_order", "is_activity_order", "TINYINT NOT NULL DEFAULT 0");
+        addColumnIfMissing("payment_order", "quota_preoccupied", "TINYINT NOT NULL DEFAULT 0");
+        addColumnIfMissing("payment_order", "activity_rule_version", "INT NULL");
         createIndexIfMissing("payment_order", "idx_payment_order_config",
                 "CREATE INDEX idx_payment_order_config ON payment_order(payment_config_id)");
         createIndexIfMissing("payment_order", "uk_payment_order_gateway_trade",
@@ -3153,6 +3204,7 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
         addColumnIfMissing("xianyu_account_membership", "auto_renew", "TINYINT DEFAULT 0");
 
         addColumnIfMissing("xianyu_account_health_snapshot", "deleted", "TINYINT DEFAULT 0");
+        addColumnIfMissing("xianyu_account_health_snapshot", "snapshot_time", "DATETIME NULL");
         addColumnIfMissing("notification", "account_id", "BIGINT NULL");
         addColumnIfMissing("notification", "notice_type", "VARCHAR(80) NULL");
         addColumnIfMissing("notification", "level", "VARCHAR(40) NULL");
@@ -3170,6 +3222,7 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
         addColumnIfMissing("operation_log", "result", "TINYINT DEFAULT 1");
         addColumnIfMissing("operation_log", "deleted", "TINYINT DEFAULT 0");
         addColumnIfMissing("operation_log", "updated_time", "DATETIME NULL");
+        ensureColumnNullable("operation_log", "tenant_id");
         addColumnIfMissing("opportunity_image_history", "tenant_id", "BIGINT NOT NULL DEFAULT 0");
         addColumnIfMissing("opportunity_image_history", "user_id", "BIGINT NOT NULL DEFAULT 0");
         addColumnIfMissing("opportunity_image_history", "request_id", "VARCHAR(64) NOT NULL DEFAULT ''");
@@ -3229,6 +3282,8 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
         addColumnIfMissing("delivery_text_source", "deleted", "TINYINT DEFAULT 0");
         // V1.66: 多条正文 + 图片发货（每条 segment 为 text 或 image 二选一，空则回退 content 单条发送）
         addColumnIfMissing("delivery_text_source", "segments", "JSON NULL COMMENT '多条正文配置（JSON 数组，每条 type=text/image 二选一，空则回退 content 单条发送）'");
+        addColumnIfMissing("delivery_text_source", "from_mall", "TINYINT NOT NULL DEFAULT 0");
+        addColumnIfMissing("delivery_text_source", "mall_product_id", "BIGINT NULL");
         addColumnIfMissing("card_group", "description", "TEXT NULL");
         addColumnIfMissing("card_group", "card_prefix", "VARCHAR(120) NULL");
         addColumnIfMissing("card_group", "password_prefix", "VARCHAR(120) NULL");
@@ -3361,6 +3416,11 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
         addColumnIfMissing("sys_tenant", "contact_name", "VARCHAR(100) NULL");
         addColumnIfMissing("sys_tenant", "contact_phone", "VARCHAR(50) NULL");
         addColumnIfMissing("sys_tenant", "contact_email", "VARCHAR(120) NULL");
+        // Older sys_user tables may predate login metadata. Admin user lists
+        // and user authentication both read/update these columns.
+        addColumnIfMissing("sys_user", "avatar", "TEXT NULL");
+        addColumnIfMissing("sys_user", "last_login_time", "DATETIME NULL");
+        addColumnIfMissing("sys_user", "last_login_ip", "VARCHAR(50) NULL");
 
         addColumnIfMissing("workflow_item_timing", "tenant_id", "BIGINT NULL");
         addColumnIfMissing("workflow_item_timing", "execution_id", "BIGINT NULL");
@@ -3428,6 +3488,7 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
         executeQuietly("UPDATE card_group g SET total_count = (SELECT COUNT(*) FROM card_item i WHERE i.group_id = g.id AND i.deleted = 0), used_count = (SELECT COUNT(*) FROM card_item i WHERE i.group_id = g.id AND i.deleted = 0 AND i.status = 2), remain_count = (SELECT COUNT(*) FROM card_item i WHERE i.group_id = g.id AND i.deleted = 0 AND i.status = 0), available_count = (SELECT COUNT(*) FROM card_item i WHERE i.group_id = g.id AND i.deleted = 0 AND i.status = 0)");
         executeQuietly("UPDATE workflow_definition SET enabled = 1 WHERE status = 'published' AND (enabled IS NULL OR enabled = 0)");
         executeQuietly("UPDATE xianyu_account_health_snapshot SET deleted = 0 WHERE deleted IS NULL");
+        executeQuietly("UPDATE xianyu_account_health_snapshot SET snapshot_time = COALESCE(snapshot_time, collected_time, created_time, NOW()) WHERE snapshot_time IS NULL");
         executeQuietly("ALTER TABLE xianyu_account_health_snapshot ALTER COLUMN snapshot_time SET DEFAULT (CURRENT_TIMESTAMP)");
         executeQuietly("UPDATE xianyu_conversation SET deleted = 0 WHERE deleted IS NULL");
         executeQuietly("UPDATE xianyu_message SET deleted = 0 WHERE deleted IS NULL");
@@ -3505,6 +3566,23 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
         }
     }
 
+    /** Platform-wide admin audit rows have no single tenant; preserve NULL for those rows. */
+    private void ensureColumnNullable(String tableName, String columnName) {
+        try {
+            if (!tableExists(tableName) || !columnExists(tableName, columnName)) return;
+            String nullable = jdbcTemplate.queryForObject(
+                    "SELECT IS_NULLABLE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+                    String.class, tableName, columnName);
+            if ("YES".equalsIgnoreCase(nullable)) return;
+            String columnType = jdbcTemplate.queryForObject(
+                    "SELECT COLUMN_TYPE FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+                    String.class, tableName, columnName);
+            jdbcTemplate.execute("ALTER TABLE " + tableName + " MODIFY COLUMN " + columnName + " " + columnType + " NULL");
+        } catch (Exception e) {
+            recordFailure("make nullable " + tableName + "." + columnName, e);
+        }
+    }
+
     private void createIndexIfMissing(String tableName, String indexName, String ddl) {
         try {
             Integer count = jdbcTemplate.queryForObject(
@@ -3547,7 +3625,8 @@ public class SchemaCompatibilityRunner implements ApplicationRunner {
     private void recordFailure(String operation, Exception error) {
         String errorType = error == null ? "UnknownError" : error.getClass().getSimpleName();
         failures.add(operation + ": " + errorType);
-        log.error("SchemaCompatibilityRunner: {} failed, errorType={}", operation, errorType);
+        String errorMessage = error == null ? "" : String.valueOf(error.getMessage());
+        log.error("SchemaCompatibilityRunner: {} failed, errorType={}, message={}", operation, errorType, errorMessage);
     }
 
     private boolean tableExists(String tableName) {

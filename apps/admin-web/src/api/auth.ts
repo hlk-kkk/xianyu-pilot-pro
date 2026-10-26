@@ -5,7 +5,7 @@ import { containsAsciiControlCharacter } from '@/utils/text-security'
 export function fetchLogin(params: Api.Auth.LoginParams) {
   return request.post<Api.Auth.LoginResponse>({
     url: '/auth/login',
-    params,
+    data: params,
     // The login view owns the single, contextual failure notification.
     showErrorMessage: false
   }).then((value) => {

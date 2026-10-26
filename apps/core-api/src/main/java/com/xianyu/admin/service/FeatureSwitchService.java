@@ -112,12 +112,12 @@ public class FeatureSwitchService {
         //   - 自动发货链路（含货源库、发货声明、发货模板、发货记录）所有等级可用
         //   - 货源商城：VIP 及以上可用
         //   - 工作流、工作流任务、商品草稿箱、图片生成记录：SVIP 专属
-        //   - 卡密仓库、定时任务：所有等级均关闭（暂未开放）
+        //   - 卡密仓库：所有等级可用；定时任务：所有等级均关闭（暂未开放）
         list.add(feature("workflow", "工作流", "automation", false, false, true));
         list.add(feature("workflow-tasks", "工作流任务", "automation", false, false, true));
         list.add(feature("workflow-drafts", "商品草稿箱", "automation", false, false, true));
         list.add(feature("workflow-image-records", "图片生成记录", "automation", false, false, true));
-        list.add(feature("card-warehouse", "卡密仓库", "automation", false, false, false));
+        list.add(feature("card-warehouse", "卡密仓库", "automation", true, true, true));
         list.add(feature("auto-delivery", "自动发货", "automation", true, true, true));
         list.add(feature("delivery-source-library", "货源库", "automation", true, true, true));
         list.add(feature("delivery-statement", "发货声明", "automation", true, true, true));

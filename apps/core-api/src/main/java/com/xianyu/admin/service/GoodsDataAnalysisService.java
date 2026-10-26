@@ -136,12 +136,12 @@ public class GoodsDataAnalysisService {
         ).join();
 
         // 获取结果（join 不会抛 InterruptedException，异常会被包装为 CompletionException）
-        Map<String, Object> goodsAgg = goodsAggFuture.join();
-        Map<String, Object> zeroStats = zeroStatsFuture.join();
-        Map<String, Object> curOrders = curOrdersFuture.join();
-        Map<String, Object> prevOrders = prevOrdersFuture.join();
+        Map<String, Object> goodsAgg = mapOrEmpty(goodsAggFuture.join());
+        Map<String, Object> zeroStats = mapOrEmpty(zeroStatsFuture.join());
+        Map<String, Object> curOrders = mapOrEmpty(curOrdersFuture.join());
+        Map<String, Object> prevOrders = mapOrEmpty(prevOrdersFuture.join());
         List<Map<String, Object>> dailyTrend = dailyTrendFuture.join();
-        Map<String, Object> noOrder = noOrderFuture.join();
+        Map<String, Object> noOrder = mapOrEmpty(noOrderFuture.join());
         List<Map<String, Object>> topByOrders = topByOrdersFuture.join();
         List<Map<String, Object>> topByExposure = topByExposureFuture.join();
 
@@ -472,6 +472,10 @@ public class GoodsDataAnalysisService {
         if (value == null) return 0L;
         if (value instanceof Number) return ((Number) value).longValue();
         try { return Long.parseLong(String.valueOf(value)); } catch (NumberFormatException e) { return 0L; }
+    }
+
+    private static Map<String, Object> mapOrEmpty(Map<String, Object> value) {
+        return value == null ? Collections.emptyMap() : value;
     }
 
     private static int toInt(Object value) {

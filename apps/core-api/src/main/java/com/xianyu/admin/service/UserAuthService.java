@@ -335,7 +335,7 @@ public class UserAuthService {
         String pwd = encoder.encode("123456");
         Long tenantId = findOrCreateDefaultTenant();
         jdbcTemplate.update(
-                "INSERT INTO sys_user(username, password_hash, nickname, email, email_verified, tenant_id, status, created_time, updated_time, deleted) VALUES(?,?,?,?,1,?,1,NOW(),NOW(),0)",
+                "INSERT INTO sys_user(username, password_hash, nickname, email, email_verified, tenant_id, status, security_version, created_time, updated_time, deleted) VALUES(?,?,?,?,1,?,1,1,NOW(),NOW(),0)",
                 "admin", pwd, "管理员", "admin@xianyu.local", tenantId);
         log.warn("仅开发环境已初始化 sys_user 默认账户：admin / 123456，请勿用于生产");
     }
@@ -438,7 +438,7 @@ public class UserAuthService {
 
         String pwd = encoder.encode(password);
         jdbcTemplate.update(
-                "INSERT INTO sys_user(username, password_hash, nickname, email, email_verified, tenant_id, status, created_time, updated_time, deleted) VALUES(?,?,?,?,1,?,1,NOW(),NOW(),0)",
+                "INSERT INTO sys_user(username, password_hash, nickname, email, email_verified, tenant_id, status, security_version, created_time, updated_time, deleted) VALUES(?,?,?,?,1,?,1,1,NOW(),NOW(),0)",
                 email, pwd, email, email, tenantId);
 
         List<Map<String, Object>> created = jdbcTemplate.queryForList(
@@ -658,7 +658,7 @@ public class UserAuthService {
         Long tenantId = createTenantForUser(email);
 
         jdbcTemplate.update(
-                "INSERT INTO sys_user(username, password_hash, nickname, email, email_verified, tenant_id, status, created_time, updated_time, deleted) VALUES(?,?,?,?,1,?,1,NOW(),NOW(),0)",
+                "INSERT INTO sys_user(username, password_hash, nickname, email, email_verified, tenant_id, status, security_version, created_time, updated_time, deleted) VALUES(?,?,?,?,1,?,1,1,NOW(),NOW(),0)",
                 email, pwd, email, email, tenantId);
 
         List<Map<String, Object>> created = jdbcTemplate.queryForList(

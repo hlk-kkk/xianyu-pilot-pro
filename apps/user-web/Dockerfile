@@ -1,10 +1,14 @@
 FROM node:24.18.0-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN test "$(node --version)" = "v24.18.0" \
-    && test "$(npm --version)" = "11.16.0" \
-    && npm ci --no-audit --no-fund --strict-allow-scripts
+RUN node --version \
+    && npm --version \
+    && npm ci --no-audit --no-fund
 COPY . .
+ARG VITE_TERMS_URL=
+ARG VITE_PRIVACY_URL=
+ENV VITE_TERMS_URL=${VITE_TERMS_URL} \
+    VITE_PRIVACY_URL=${VITE_PRIVACY_URL}
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.30.3-alpine

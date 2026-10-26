@@ -413,6 +413,33 @@ const recentCategories = ref([])
 const favoriteCategories = ref([])
 const selectedCategoryPath = ref('')
 const selectedCategoryName = ref('')
+const selectedCategoryInfo = ref(null)
+const SYNCED_GOODS_CATEGORY = {
+  id: 99000001,
+  value: 99000001,
+  label: '同步商品类目',
+  title: '同步商品类目',
+  pid: 0,
+  children: [{
+    id: 99000002,
+    value: 99000002,
+    label: '网站/工具会员充值',
+    title: '网站/工具会员充值',
+    pid: 99000001,
+    catId: '50023914',
+    channelCatId: '201703301',
+    tbCatId: '123604002',
+  }],
+}
+
+function withSyncedGoodsCategory(tree) {
+  return [...tree.filter(item => item.id !== SYNCED_GOODS_CATEGORY.id), SYNCED_GOODS_CATEGORY]
+}
+
+function categoryPayload() {
+  if (!selectedCategoryName.value) return null
+  return selectedCategoryInfo.value || { catName: selectedCategoryName.value }
+}
 const aiCategoryStatus = ref({ configured: null })
 const aiCategoryStatusError = ref('')
 const aiCategoryLoading = ref(false)
@@ -436,6 +463,7 @@ function selectLevel1(cat) {
   level3List.value = []
   selectedCategoryName.value = cat.label || cat.title
   selectedCategoryPath.value = cat.label || cat.title
+  selectedCategoryInfo.value = cat.catId ? { catName: selectedCategoryName.value, catId: cat.catId, channelCatId: cat.channelCatId || '', tbCatId: cat.tbCatId || '' } : null
   if (!level2List.value.length) rememberCategory({ name: selectedCategoryName.value, path: selectedCategoryPath.value, pathIds: [cat.id] })
 }
 
@@ -448,6 +476,7 @@ function selectLevel2(cat) {
   const path = (l1?.label || l1?.title) + ' ＞ ' + (cat.label || cat.title)
   selectedCategoryName.value = cat.label || cat.title
   selectedCategoryPath.value = path
+  selectedCategoryInfo.value = cat.catId ? { catName: selectedCategoryName.value, catId: cat.catId, channelCatId: cat.channelCatId || '', tbCatId: cat.tbCatId || '' } : null
   if (!level3List.value.length) rememberCategory({ name: selectedCategoryName.value, path, pathIds: [l1?.id, cat.id].filter(Boolean) })
 }
 
@@ -459,6 +488,7 @@ function selectLevel3(cat) {
   const path = (l1?.label || l1?.title) + ' ＞ ' + (l2?.label || l2?.title) + ' ＞ ' + (cat.label || cat.title)
   selectedCategoryName.value = cat.label || cat.title
   selectedCategoryPath.value = path
+  selectedCategoryInfo.value = cat.catId ? { catName: selectedCategoryName.value, catId: cat.catId, channelCatId: cat.channelCatId || '', tbCatId: cat.tbCatId || '' } : null
   rememberCategory({ name: selectedCategoryName.value, path, pathIds: [l1?.id, l2?.id, cat.id].filter(Boolean) })
 }
 
@@ -687,7 +717,7 @@ async function refreshCategoriesInBackground() {
     if (!categoryRefreshGate.isCurrent(requestGeneration)) return
     const newTree = res?.data?.cation || []
     if (newTree.length) {
-      categories.value = newTree
+      categories.value = withSyncedGoodsCategory(newTree)
     }
   } catch {
     // This is a best-effort refresh; the bundled category tree remains usable.
@@ -1256,7 +1286,7 @@ async function loadCategories() {
     const module = await import('../assets/data/categories.json')
     const tree = module.default?.cation || module.cation
     if (!Array.isArray(tree)) throw new Error('商品分类响应格式异常')
-    categories.value = tree
+    categories.value = withSyncedGoodsCategory(tree)
     categoriesAvailable.value = true
     // 静默从后端拉取最新分类树（含自动分类新增的分类）
     // 自动分类服务在后台已将新分类写入后端 categories.json
@@ -1460,7 +1490,7 @@ async function submit() {
         supportSelfPick: form.supportSelfPick,
         postFee: shippingMode.value === 'fixed' ? form.price : 0,
         location: locationData,
-        category: selectedCategoryName.value ? { catName: selectedCategoryName.value } : null,
+        category: categoryPayload(),
       })
     } else {
       // 普通发布：使用原有 /item/publish
@@ -1471,7 +1501,7 @@ async function submit() {
         imageUrls: form.imageUrls,
         price: finalPrice,
         stock: finalStock,
-        category: selectedCategoryName.value,
+        category: categoryPayload(),
         freeShipping,
         supportSelfPick: form.supportSelfPick,
         location: locationData,

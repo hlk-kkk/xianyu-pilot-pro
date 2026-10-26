@@ -163,6 +163,7 @@ services:
       - data
 
   crawler-service:
+    platform: linux/amd64
     build: ./apps/crawler-service
     container_name: xianyu-crawler-service
     restart: unless-stopped
@@ -185,6 +186,7 @@ services:
       crawler-postgres:
         condition: service_healthy
     environment:
+      NODE_ENV: development
       CRAWLER_DB_HOST: crawler-postgres
       CRAWLER_DB_PORT: 5432
       CRAWLER_DB_USER: ${CRAWLER_DB_USER:-crawler}
@@ -215,6 +217,7 @@ services:
       - data
 
   crawler-worker:
+    platform: linux/amd64
     build: ./apps/crawler-service
     container_name: xianyu-crawler-worker
     restart: unless-stopped
@@ -237,6 +240,7 @@ services:
       crawler-postgres:
         condition: service_healthy
     environment:
+      NODE_ENV: development
       CRAWLER_DB_HOST: crawler-postgres
       CRAWLER_DB_PORT: 5432
       CRAWLER_DB_USER: ${CRAWLER_DB_USER:-crawler}
@@ -365,7 +369,11 @@ services:
       - app
 
   user-web:
-    build: ./apps/user-web
+    build:
+      context: ./apps/user-web
+      args:
+        VITE_TERMS_URL: ${VITE_TERMS_URL:-}
+        VITE_PRIVACY_URL: ${VITE_PRIVACY_URL:-}
     container_name: xianyu-user-web
     restart: unless-stopped
     init: true
