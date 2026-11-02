@@ -1,0 +1,15 @@
+# Aliyun FRP server. Replace the token and keep this file root-readable only.
+bindPort = 7000
+
+# The gate and Presenton tunnel must only listen on loopback.
+proxyBindAddr = "127.0.0.1"
+allowPorts = [{ start = 7081, end = 7081 }]
+
+auth.method = "token"
+auth.token = "REPLACE_WITH_A_LONG_RANDOM_FRP_TOKEN"
+
+transport.tls.force = true
+
+log.to = "/var/log/frps.log"
+log.level = "info"
+log.maxDays = 7

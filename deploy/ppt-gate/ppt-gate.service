@@ -1,0 +1,23 @@
+[Unit]
+Description=PPT Gate (Xianyu AI PPT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pptgate
+Group=pptgate
+WorkingDirectory=/opt/ppt-gate
+EnvironmentFile=/opt/ppt-gate/.env
+ExecStart=/opt/ppt-gate/.venv/bin/uvicorn app.asgi:app --host 127.0.0.1 --port 8009 --no-access-log
+Restart=always
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/ppt-gate/data
+
+[Install]
+WantedBy=multi-user.target

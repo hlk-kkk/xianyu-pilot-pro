@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from unittest.mock import AsyncMock
 
 import pytest
@@ -218,6 +219,20 @@ async def test_should_trigger_ai_auto_reply_allows_partial_buyer_text():
     assert content_type_int == 1
     assert sender_user_id == ""
     assert reminder_content == ""
+
+
+def test_log_duplicate_enabled_accounts(caplog):
+    rows = [
+        {"external_uid": "2980835701", "account_count": 2, "account_ids": "1,2"},
+        {"external_uid": "111", "account_count": 1, "account_ids": "3"},
+    ]
+
+    with caplog.at_level(logging.WARNING, logger="app.services.ws_startup"):
+        duplicates = ws_startup.log_duplicate_enabled_accounts(rows)
+
+    assert duplicates == 1
+    assert "2980835701" in caplog.text
+    assert "1,2" in caplog.text
 
 
 @pytest.mark.anyio

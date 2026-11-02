@@ -23,6 +23,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mockingDetails;
@@ -85,7 +86,8 @@ class OrderDeliveryCommandServiceTest {
                 eq(2),
                 eq(0),
                 eq(0),
-                eq("pending")
+                eq("pending"),
+                isNull()
         );
         verify(deliveryExecutionService).retryDelivery(900L, 1L);
     }

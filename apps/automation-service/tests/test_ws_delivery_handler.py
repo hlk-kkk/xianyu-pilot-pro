@@ -143,6 +143,115 @@ async def test_process_delivery_uses_goods_level_text_source_when_payment_messag
 
 
 @pytest.mark.asyncio
+async def test_handle_incoming_continues_when_order_sync_fails(monkeypatch):
+    """订单 API/同步失败不得阻塞 WS 付款消息的自动发货。"""
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+    def _raise_order_sync(*args, **kwargs):
+        raise RuntimeError("merchant.sold.get permission denied")
+
+    notify = AsyncMock()
+    process = AsyncMock()
+    statement = AsyncMock(return_value=False)
+
+    import app.services.notify_dispatcher as notify_dispatcher
+
+    monkeypatch.setattr(ws_delivery_handler, "async_session", lambda: _Session())
+    monkeypatch.setattr(ws_delivery_handler, "_trigger_account_orders_sync", _raise_order_sync)
+    monkeypatch.setattr(notify_dispatcher, "notify_new_order", notify)
+    monkeypatch.setattr(ws_delivery_handler, "_should_send_statement", statement)
+    monkeypatch.setattr(ws_delivery_handler, "_process_delivery", process)
+
+    await ws_delivery_handler.handle_incoming_message_for_delivery(
+        1,
+        2,
+        {
+            "contentType": 26,
+            "reminderContent": "[我已付款，等待你发货]",
+            "sId": "62965262020",
+            "senderUserId": "4182068955155@goofish",
+            "xyGoodsId": "1060794911332",
+        },
+    )
+
+    notify.assert_awaited_once()
+    statement.assert_awaited_once()
+    process.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_process_delivery_skips_when_existing_realtime_delivery(monkeypatch):
+    """重复付款消息命中已有发货记录时不得再次认领/发送。"""
+
+    class _DB:
+        async def commit(self):
+            return None
+
+        async def rollback(self):
+            return None
+
+    inner = AsyncMock()
+    monkeypatch.setattr(
+        ws_delivery_handler, "_has_existing_realtime_delivery", AsyncMock(return_value=True)
+    )
+    monkeypatch.setattr(ws_delivery_handler, "_process_delivery_inner", inner)
+
+    await ws_delivery_handler._process_delivery(
+        db=_DB(),
+        tenant_id=1,
+        account_id=2,
+        msg={
+            "contentType": 26,
+            "sId": "62965262020",
+            "senderUserId": "4182068955155@goofish",
+            "xyGoodsId": "1060794911332",
+            "reminderContent": "[我已付款，等待你发货]",
+        },
+    )
+
+    inner.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_has_existing_realtime_delivery_returns_true_for_manual_delivery_record():
+    """手动发货已写入 delivery_record 时，后续 WS 付款消息必须跳过。"""
+
+    class _ManualRecordDB:
+        async def execute(self, statement, params=None):
+            sql = str(statement)
+            if "FROM delivery_record" in sql and "order_id = :order_id" in sql:
+                assert params["order_id"] == "ORDER-MANUAL-55"
+                return _FakeResult(row={"id": 900})
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+    exists = await ws_delivery_handler._has_existing_realtime_delivery(
+        db=_ManualRecordDB(),
+        tenant_id=1,
+        account_id=2,
+        order_id="ORDER-MANUAL-55",
+        s_id="62965262020",
+        xy_goods_id="1097968124120",
+        buyer_user_id="4182068955155@goofish",
+        pnm_id="4182068955155.PNM",
+        delivery_content="https://ppt.linjitech.com/r/PPT-TEST",
+    )
+
+    assert exists is True
+
+
+@pytest.mark.asyncio
 async def test_has_existing_realtime_delivery_matches_full_receiver_info_payload():
     class _ExistingDeliveryDB:
         async def execute(self, statement, params=None):
@@ -535,3 +644,44 @@ async def test_handle_incoming_message_for_delivery_does_not_trigger_sync_on_irr
     )
 
     assert captured == []
+
+
+class _InsertCaptureDB:
+    def __init__(self):
+        self.params = None
+
+    async def execute(self, statement, params=None):
+        self.params = params or {}
+        return _FakeResult()
+
+
+@pytest.mark.asyncio
+async def test_insert_delivery_record_persists_card_and_quantity_fields():
+    db = _InsertCaptureDB()
+
+    await ws_delivery_handler._insert_delivery_record(
+        db,
+        tenant_id=1,
+        account_id=2,
+        order_id=None,
+        s_id="68528407012",
+        pnm_id="1",
+        buyer_user_id="2804255088",
+        buyer_user_name="买家",
+        xy_goods_id="1097153725944",
+        buy_quantity=1,
+        rule_id=5,
+        delivery_type="kami",
+        content="https://ppt.linji.tech/r/PPT-TEST",
+        status=2,
+        quantity_requested=1,
+        quantity_sent=1,
+        card_item_id=6,
+    )
+
+    assert db.params["status"] == 2
+    assert db.params["delivery_status"] == "success"
+    assert db.params["delivery_success"] == 1
+    assert db.params["quantity_requested"] == 1
+    assert db.params["quantity_sent"] == 1
+    assert db.params["card_item_id"] == 6

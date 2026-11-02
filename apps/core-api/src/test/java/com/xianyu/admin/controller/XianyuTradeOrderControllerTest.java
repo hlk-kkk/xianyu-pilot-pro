@@ -7,9 +7,11 @@ import com.xianyu.admin.dto.OrderSyncRequest;
 import com.xianyu.admin.common.PageResult;
 import com.xianyu.admin.dto.XianyuTradeOrderVO;
 import com.xianyu.admin.security.TenantContext;
+import com.xianyu.admin.service.AutomationClient;
 import com.xianyu.admin.service.OrderDeliveryCommandService;
 import com.xianyu.admin.service.XianyuTradeOrderService;
 import org.junit.jupiter.api.AfterEach;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -37,11 +39,18 @@ class XianyuTradeOrderControllerTest {
     @Mock
     private OrderDeliveryCommandService orderDeliveryCommandService;
 
+    @Mock
+    private AutomationClient automationClient;
+
+    @Mock
+    private JdbcTemplate jdbcTemplate;
+
     private XianyuTradeOrderController controller;
 
     @BeforeEach
     void setUp() {
-        controller = new XianyuTradeOrderController(orderService, orderDeliveryCommandService);
+        controller = new XianyuTradeOrderController(
+                orderService, orderDeliveryCommandService, automationClient, jdbcTemplate);
         TenantContext.setCurrentTenantId(1L);
     }
 

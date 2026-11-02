@@ -13,6 +13,7 @@ import hashlib
 import io
 import json
 import logging
+import os
 import random
 import re
 import secrets
@@ -24,6 +25,7 @@ from typing import Optional
 
 import qrcode
 import requests
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,16 @@ H_API = {
 POLL_INTERVAL = 0.8
 SESSION_TIMEOUT = 300  # 5 分钟
 MAX_QR_RESPONSE_KEY_PATHS = 300
+
+# crawler-service 的 Playwright 扫码：真实浏览器登录后能取到
+# `_hvn_lgc_` / `havana_lgc_exp` 等 passport 接口拿不到的 SSO Cookie。
+CRAWLER_SERVICE_URL = (os.getenv("CRAWLER_SERVICE_URL", "") or "").rstrip("/")
+CRAWLER_INTERNAL_TOKEN = (os.getenv("INTERNAL_API_TOKEN", "") or "").strip()
+QR_LOGIN_BROWSER_ENABLED = (
+    os.getenv("QR_LOGIN_BROWSER_ENABLED", "true").strip().lower()
+    not in {"0", "false", "no", "off"}
+)
+BROWSER_QR_SCAN_TIMEOUT_MS = int(os.getenv("QR_LOGIN_BROWSER_SCAN_TIMEOUT_MS", "120000"))
 
 # 上海时区 UTC+8
 SHANGHAI_TZ = timezone(timedelta(hours=8))
@@ -298,6 +310,83 @@ def _collect_session_cookies(session: requests.Session, resp: requests.Response)
     return cookies
 
 
+CRITICAL_LOGIN_COOKIES = ("_hvn_lgc_", "havana_lgc_exp", "cookie2", "unb")
+_LOGIN_HOST_SUFFIXES = ("goofish.com", "taobao.com", "alibaba.com", "alicdn.com")
+
+
+def _missing_critical_login_cookies(cookies: dict) -> list[str]:
+    return [key for key in CRITICAL_LOGIN_COOKIES if key not in cookies]
+
+
+def _is_allowed_login_url(url: str) -> bool:
+    try:
+        host = (urlparse(str(url or "")).hostname or "").lower()
+    except ValueError:
+        return False
+    if not host:
+        return False
+    return any(host == suffix or host.endswith("." + suffix) for suffix in _LOGIN_HOST_SUFFIXES)
+
+
+def _hydrate_login_state(
+    session: requests.Session,
+    data: dict,
+    login_form: dict,
+) -> dict:
+    """Follow the post-QR SSO redirect to collect the browser login cookies.
+
+    The passport QR response does not include ``_hvn_lgc_`` /
+    ``havana_lgc_exp``; those are set by the web SSO redirect. Without them
+    ``hasLogin`` reports SESSION_EXPIRED about a minute later and the WS is
+    disconnected. Only follow URLs on Xianyu/Taobao/Alibaba hosts.
+    """
+    candidates: list[str] = []
+    redirect_keys = (
+        "loginSucResultUrl",
+        "loginSucResultURL",
+        "loginSucResultAction",
+        "redirectUrl",
+        "redirect_url",
+        "redirectUri",
+        "redirect_uri",
+        "url",
+    )
+    for source in (data, login_form):
+        if not isinstance(source, dict):
+            continue
+        for key in redirect_keys:
+            value = source.get(key)
+            if isinstance(value, str) and value.strip().startswith(("http://", "https://")):
+                if _is_allowed_login_url(value):
+                    candidates.append(value.strip())
+
+    if not candidates:
+        candidates = ["https://www.goofish.com/", "https://seller.goofish.com/"]
+
+    seen: set[str] = set()
+    for url in candidates:
+        if url in seen:
+            continue
+        seen.add(url)
+        try:
+            response = session.get(url, headers=H_PAGE, timeout=20, allow_redirects=True)
+            _collect_session_cookies(session, response)
+            logger.info(
+                "扫码登录后补全登录态: host=%s status=%s",
+                (urlparse(url).hostname or "")[:80],
+                response.status_code,
+            )
+        except Exception as exc:
+            logger.warning(
+                "扫码登录后补全登录态失败: host=%s errorType=%s",
+                (urlparse(url).hostname or "")[:80],
+                type(exc).__name__,
+            )
+        if not _missing_critical_login_cookies(dict(session.cookies)):
+            break
+    return dict(session.cookies)
+
+
 def _poll_status(session: requests.Session, login_form: dict, timeout: int = SESSION_TIMEOUT) -> dict:
     """Step 4: 轮询扫码状态，阻塞直到完成或超时。"""
     start = time.time()
@@ -312,6 +401,17 @@ def _poll_status(session: requests.Session, login_form: dict, timeout: int = SES
                 return {"status": "verification_required", "iframe_redirect_url": data.get("iframeRedirectUrl")}
             # 收集 Cookie：同时从 session.cookies 和响应头 Set-Cookie 合并，避免丢失登录态字段
             cookies = _collect_session_cookies(session, resp)
+            cookies = _hydrate_login_state(session, data, login_form)
+            missing = _missing_critical_login_cookies(cookies)
+            if missing:
+                logger.error(
+                    "扫码登录未取得完整登录态 missing=%s，拒绝保存（请改用浏览器 Cookie 或重试）",
+                    missing,
+                )
+                return {
+                    "status": "error",
+                    "message": "扫码登录未取得完整登录态，请改用浏览器 Cookie 或重试",
+                }
             return {"status": "confirmed", "cookies": cookies}
         elif status == "EXPIRED":
             return {"status": "expired"}
@@ -338,11 +438,236 @@ def _poll_status_once(session: requests.Session, login_form: dict) -> dict:
                 return {"status": "verification_required", "iframe_redirect_url": data.get("iframeRedirectUrl")}
             # 收集 Cookie：同时从 session.cookies 和响应头 Set-Cookie 合并，避免丢失登录态字段
             cookies = _collect_session_cookies(session, resp)
+            cookies = _hydrate_login_state(session, data, login_form)
+            missing = _missing_critical_login_cookies(cookies)
+            if missing:
+                logger.error(
+                    "扫码登录未取得完整登录态 missing=%s，拒绝保存（请改用浏览器 Cookie 或重试）",
+                    missing,
+                )
+                return {
+                    "status": "error",
+                    "message": "扫码登录未取得完整登录态，请改用浏览器 Cookie 或重试",
+                }
             return {"status": "confirmed", "cookies": cookies}
         return {"status": status.lower()}
     except Exception as e:
         logger.error("轮询异常 errorType=%s", type(e).__name__)
         return {"status": "error", "message": "登录状态查询失败，请稍后重试"}
+
+
+# ==================== crawler 浏览器扫码 ====================
+
+
+def _browser_qr_enabled() -> bool:
+    return bool(
+        QR_LOGIN_BROWSER_ENABLED
+        and CRAWLER_SERVICE_URL
+        and CRAWLER_INTERNAL_TOKEN
+    )
+
+
+def _crawler_post(path: str, payload: dict, tenant_id: int, timeout: float) -> dict:
+    headers = {
+        "X-Internal-Token": CRAWLER_INTERNAL_TOKEN,
+        "X-Internal-Tenant-Id": str(int(tenant_id)),
+    }
+    response = requests.post(
+        f"{CRAWLER_SERVICE_URL}{path}",
+        json=payload,
+        headers=headers,
+        timeout=timeout,
+    )
+    try:
+        data = response.json()
+    except ValueError:
+        data = {}
+    if response.status_code != 200 or not data.get("ok"):
+        message = str(data.get("error") or f"crawler-service HTTP {response.status_code}")
+        raise RuntimeError(message)
+    return data
+
+
+def _parse_cookie_text(cookie_text: str) -> dict:
+    cookies = {}
+    for part in str(cookie_text or "").split(";"):
+        key, separator, value = part.partition("=")
+        key = key.strip()
+        if separator and key:
+            cookies[key] = value.strip()
+    return cookies
+
+
+def _cancel_browser_session(session: dict) -> None:
+    crawler_session_id = str(session.get("crawler_session_id") or "")
+    tenant_id = _positive_id(session.get("tenant_id"))
+    if not crawler_session_id or tenant_id is None or not _browser_qr_enabled():
+        return
+    try:
+        _crawler_post(
+            "/api/qrlogin/cancel",
+            {"sessionId": crawler_session_id},
+            tenant_id,
+            timeout=10,
+        )
+    except Exception as exc:  # 取消失败不影响本地会话清理
+        logger.debug("取消 crawler 扫码会话失败 errorType=%s", type(exc).__name__)
+
+
+def _browser_wait_for_login(session_id: str, crawler_session_id: str, tenant_id: int) -> None:
+    """后台等待用户在浏览器二维码上确认，成功后把完整 Cookie 写入会话。"""
+    try:
+        data = _crawler_post(
+            "/api/qrlogin/solve",
+            {
+                "sessionId": crawler_session_id,
+                "scanTimeoutMs": BROWSER_QR_SCAN_TIMEOUT_MS,
+            },
+            tenant_id,
+            timeout=BROWSER_QR_SCAN_TIMEOUT_MS / 1000 + 30,
+        )
+        cookies = _parse_cookie_text(str(data.get("cookieStr") or ""))
+        # 浏览器登录是当前最完整的来源；不再用 passport 场景下的 SSO 字段做硬拦截。
+        # 是否真正可用交给后续 hasLogin 校验，避免误杀可用的 18-cookie 会话。
+        if not cookies.get("unb") or not cookies.get("cookie2"):
+            logger.error(
+                "浏览器扫码缺少基础登录态 unb/cookie2 cookieKeys=%s",
+                sorted(cookies.keys()),
+            )
+            with _lock:
+                session = _sessions.get(session_id)
+                if session is not None:
+                    session["status"] = "error"
+                    session["message"] = "扫码登录未取得有效登录态，请重试"
+            return
+        missing = _missing_critical_login_cookies(cookies)
+        if missing:
+            logger.warning(
+                "浏览器扫码缺少部分 SSO 字段 missing=%s，继续保存并交给 hasLogin 校验 cookieCount=%d",
+                missing,
+                len(cookies),
+            )
+        else:
+            logger.info("浏览器扫码登录态字段完整 cookieCount=%d", len(cookies))
+
+        with _lock:
+            session = _sessions.get(session_id)
+            if session is None:
+                return
+            session["saved_cookies"] = cookies
+            session["status"] = "confirmed"
+            session["message"] = "扫码登录成功"
+        logger.info(
+            "浏览器扫码登录成功 tenantId=%s cookieCount=%d",
+            tenant_id,
+            len(cookies),
+        )
+    except Exception as exc:
+        message = str(exc)
+        timed_out = "超时" in message or "timeout" in message.lower()
+        logger.warning("浏览器扫码等待结束 errorType=%s timedOut=%s", type(exc).__name__, timed_out)
+        with _lock:
+            session = _sessions.get(session_id)
+            if session is None or session.get("status") in {"confirmed", "cancelled"}:
+                return
+            session["status"] = "expired" if timed_out else "error"
+            session["message"] = (
+                "二维码已过期，请重新生成" if timed_out else "扫码登录失败，请重试"
+            )
+
+
+def _browser_session_status(session: dict) -> dict:
+    status = str(session.get("status") or "pending")
+    if status == "confirmed":
+        cookies = session.get("saved_cookies") or {}
+        unb = str(cookies.get("unb") or "")
+        return {
+            "status": "confirmed",
+            "unb": unb,
+            "externalUid": unb,
+            "message": str(session.get("message") or "扫码登录成功"),
+        }
+    if status in {"expired", "error", "cancelled"}:
+        default_message = {
+            "expired": "二维码已过期，请重新生成",
+            "error": "扫码登录失败，请重试",
+            "cancelled": "扫码登录已取消",
+        }[status]
+        return {
+            "status": status,
+            "message": str(session.get("message") or default_message),
+        }
+    return {
+        "status": "pending",
+        "message": str(session.get("message") or "请使用闲鱼 App 扫码登录"),
+    }
+
+
+def _generate_browser_qrcode(user_id: int, tenant_id: int) -> dict:
+    session_id = secrets.token_urlsafe(32)
+    with _lock:
+        owner_session_count = sum(
+            1
+            for session in _sessions.values()
+            if session.get("user_id") == user_id
+            and session.get("tenant_id") == tenant_id
+        )
+        if owner_session_count >= _MAX_SESSIONS_PER_OWNER:
+            raise RuntimeError("too many active QR login sessions for this owner")
+        if len(_sessions) >= _MAX_SESSIONS:
+            raise RuntimeError("QR login session capacity is temporarily exhausted")
+        _sessions[session_id] = {
+            "mode": "browser",
+            "status": "initializing",
+            "created_at": time.time(),
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "qr_image": "",
+            "crawler_session_id": "",
+        }
+
+    try:
+        data = _crawler_post(
+            "/api/qrlogin/capture",
+            {"headless": True},
+            tenant_id,
+            timeout=90,
+        )
+        crawler_session_id = str(data.get("sessionId") or "")
+        qr_image_base64 = str(data.get("qrImageBase64") or "")
+        if len(crawler_session_id) != 32 or not qr_image_base64:
+            raise RuntimeError("crawler-service 未返回有效二维码")
+        qr_image = f"data:image/png;base64,{qr_image_base64}"
+    except Exception as exc:
+        with _lock:
+            _sessions.pop(session_id, None)
+        logger.error("浏览器扫码二维码生成失败 errorType=%s", type(exc).__name__)
+        raise RuntimeError("生成闲鱼登录二维码失败，请稍后重试") from exc
+
+    with _lock:
+        session = _sessions.get(session_id)
+        if session is None:
+            raise RuntimeError("QR login session reservation expired")
+        session.update({
+            "status": "pending",
+            "message": "请使用闲鱼 App 扫码登录",
+            "qr_image": qr_image,
+            "crawler_session_id": crawler_session_id,
+        })
+
+    threading.Thread(
+        target=_browser_wait_for_login,
+        args=(session_id, crawler_session_id, tenant_id),
+        name=f"qrlogin-{session_id[:8]}",
+        daemon=True,
+    ).start()
+    logger.info("浏览器扫码会话已创建 tenantId=%s", tenant_id)
+    return {
+        "sessionId": session_id,
+        "qrImage": qr_image,
+        "status": "pending",
+        "message": "请使用闲鱼 App 扫码登录",
+    }
 
 
 # ==================== 公开 API ====================
@@ -360,6 +685,10 @@ def generate_qrcode(user_id: int = None, tenant_id: int = None) -> dict:
         raise ValueError("扫码登录必须绑定有效的用户和租户")
 
     _cleanup_expired()
+
+    # 有 crawler-service 时优先走真实浏览器扫码；passport 接口拿不到完整 SSO 登录态。
+    if _browser_qr_enabled():
+        return _generate_browser_qrcode(owner_user_id, owner_tenant_id)
 
     session_id = secrets.token_urlsafe(32)
     s = requests.Session()
@@ -433,6 +762,9 @@ def get_session_status(session_id: str) -> dict:
         with _lock:
             _sessions.pop(session_id, None)
         return {"status": "expired", "message": "登录超时"}
+
+    if sdata.get("mode") == "browser":
+        return _browser_session_status(sdata)
 
     result = _poll_status_once(sdata["session"], sdata["login_form"])
 
@@ -535,7 +867,10 @@ def cleanup_session(session_id: str) -> bool:
     if not _valid_session_id(session_id):
         return False
     with _lock:
-        return _sessions.pop(session_id, None) is not None
+        session = _sessions.pop(session_id, None)
+    if session is not None and session.get("mode") == "browser":
+        _cancel_browser_session(session)
+    return session is not None
 
 
 def cleanup_session_for_owner(session_id: str, user_id: int, tenant_id: int) -> bool:
@@ -551,7 +886,9 @@ def cleanup_session_for_owner(session_id: str, user_id: int, tenant_id: int) -> 
         if session.get("user_id") != owner_user_id or session.get("tenant_id") != owner_tenant_id:
             return False
         _sessions.pop(session_id, None)
-        return True
+    if session.get("mode") == "browser":
+        _cancel_browser_session(session)
+    return True
 
 
 def cleanup_sessions_for_owner(user_id: int, tenant_id: int) -> int:
@@ -567,9 +904,11 @@ def cleanup_sessions_for_owner(user_id: int, tenant_id: int) -> int:
             if session.get("user_id") == owner_user_id
             and session.get("tenant_id") == owner_tenant_id
         ]
-        for sid in owned:
-            _sessions.pop(sid, None)
-        return len(owned)
+        removed = [_sessions.pop(sid) for sid in owned]
+    for session in removed:
+        if session.get("mode") == "browser":
+            _cancel_browser_session(session)
+    return len(removed)
 
 
 # ==================== 完整流程（独立运行） ====================

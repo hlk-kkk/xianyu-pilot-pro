@@ -2544,6 +2544,18 @@ async def _execute_kami_delivery(
         fail_reason = "发送卡密消息时出现异常，系统将自动重试"
         is_transient_error = True
 
+    card_item_ids = [item["id"] for item in card_items]
+    if send_ok:
+        logger.info(
+            "卡密发货成功: tenantId=%d accountId=%d sId=%s cardItemIds=%s quantity=%d",
+            tenant_id, account_id, s_id, card_item_ids, buy_quantity,
+        )
+    else:
+        logger.warning(
+            "卡密发货发送失败: tenantId=%d accountId=%d sId=%s cardItemIds=%s transient=%s reason=%s",
+            tenant_id, account_id, s_id, card_item_ids, is_transient_error, fail_reason,
+        )
+
     # Step 5: 更新卡密状态（发送成功→已使用；发送失败→回滚）
     # 注意：发送失败时回滚卡密，让下次重试可以重新认领
     if send_ok:
@@ -2572,17 +2584,18 @@ async def _execute_kami_delivery(
             logger.warning("更新卡密组统计失败 tenantId=%d groupId=%s error=%s", tenant_id, card_group_id, e)
 
     # Step 7: 记录发货记录（必须成功，让用户看到发货结果）
-    # status: 1=处理中(已发送待确认), 2=成功, 3=失败
+    # status: 1=处理中(等待平台确认), 2=成功, 3=失败
+    # 卡密已实际发送给买家即视为成功；order_id 为空只影响平台确认，不影响本次发货结果。
     record_status = 2 if send_ok else 3
-    if send_ok and not order_id:
-        # 发送成功但无 order_id，无法确认发货，标记为处理中
-        record_status = 1
     await _safe_insert_delivery_record(
         db, tenant_id, account_id, order_id, s_id, pnm_id,
         buyer_user_id, buyer_user_name, xy_goods_id, buy_quantity,
         rule_id=rule_id, delivery_type=MODE_KAMI,
         content=combined_content, status=record_status,
         fail_reason=fail_reason, trigger_source=trigger_source,
+        quantity_requested=buy_quantity,
+        quantity_sent=len(card_item_ids) if send_ok else 0,
+        card_item_id=card_item_ids[0] if card_item_ids else None,
     )
 
     # Step 8: 确认发货（仅在发送成功时执行；order_id 为空时反查本地订单表）
@@ -2699,6 +2712,9 @@ async def _safe_insert_delivery_record(
     trigger_source: str = "payment",
     delivery_mode: Optional[str] = None,
     delivery_timing: Optional[str] = DELIVERY_TIMING_AFTER_PAYMENT,
+    quantity_requested: Optional[int] = None,
+    quantity_sent: Optional[int] = None,
+    card_item_id: Optional[int] = None,
 ) -> None:
     """安全地插入发货记录，失败时仅记录日志不抛出异常。
 
@@ -2715,6 +2731,9 @@ async def _safe_insert_delivery_record(
             trigger_source=trigger_source,
             delivery_mode=delivery_mode,
             delivery_timing=delivery_timing,
+            quantity_requested=quantity_requested,
+            quantity_sent=quantity_sent,
+            card_item_id=card_item_id,
         )
     except Exception as e:
         logger.error(
@@ -3476,6 +3495,9 @@ async def _insert_delivery_record(
     external_allocation_id: Optional[str] = None,
     delivery_mode: Optional[str] = None,
     delivery_timing: Optional[str] = DELIVERY_TIMING_AFTER_PAYMENT,
+    quantity_requested: Optional[int] = None,
+    quantity_sent: Optional[int] = None,
+    card_item_id: Optional[int] = None,
 ):
     """插入发货记录。
 
@@ -3492,12 +3514,14 @@ async def _insert_delivery_record(
                 tenant_id, account_id, order_id, rule_id, delivery_type, delivery_mode,
                 content, delivery_content, receiver_info, delivery_timing,
                 status, delivery_status, error_message, retry_count,
-                fail_reason, delivery_time, completed_time, created_time, updated_time, deleted
+                fail_reason, delivery_time, completed_time, created_time, updated_time, deleted,
+                quantity_requested, quantity_sent, card_item_id
             ) VALUES(
                 :tenant_id, :account_id, :order_id, :rule_id, :delivery_type, :delivery_mode,
                 :content, :delivery_content, :receiver_info, :delivery_timing,
                 :status, :delivery_status, :error_message, 0,
-                :fail_reason, IF(:delivery_success = 1, NOW(), NULL), IF(:delivery_success = 1, NOW(), NULL), NOW(), NOW(), 0
+                :fail_reason, IF(:delivery_success = 1, NOW(), NULL), IF(:delivery_success = 1, NOW(), NULL), NOW(), NOW(), 0,
+                :quantity_requested, :quantity_sent, :card_item_id
             )
         """),
         {
@@ -3520,6 +3544,9 @@ async def _insert_delivery_record(
             "error_message": error_msg,
             "fail_reason": fail_reason,
             "delivery_success": 1 if status == 2 else 0,
+            "quantity_requested": quantity_requested if quantity_requested is not None else buy_quantity,
+            "quantity_sent": quantity_sent if quantity_sent is not None else (buy_quantity if status == 2 else 0),
+            "card_item_id": card_item_id,
         }
     )
     

@@ -123,6 +123,7 @@ async def _load_active_accounts() -> list[dict]:
                     LIMIT 1
                  )
                 WHERE a.deleted = 0
+                  AND a.status = 1
                   AND auth.encrypted_cookie IS NOT NULL
                   AND auth.encrypted_cookie != ''
                   AND auth.cookie_status = 1

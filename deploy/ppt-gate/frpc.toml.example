@@ -1,0 +1,20 @@
+# Mac-side FRP client. Presenton stays on 127.0.0.1:5001.
+serverAddr = "8.148.80.73"
+serverPort = 7000
+loginFailExit = false
+
+auth.method = "token"
+auth.token = "REPLACE_WITH_A_LONG_RANDOM_FRP_TOKEN"
+transport.tls.enable = true
+
+log.to = "/Users/hulk/presenton_data/frp/frpc.log"
+log.level = "info"
+log.maxDays = 7
+
+[[proxies]]
+name = "presenton"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 5001
+# The gate on Aliyun connects to 127.0.0.1:7081. Do not use 7080 for Presenton.
+remotePort = 7081

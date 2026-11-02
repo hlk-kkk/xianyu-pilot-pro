@@ -17,11 +17,10 @@
  * - Python 实现依赖逆向接口，可能不稳定
  * - 本实现走真实浏览器，与用户手动登录完全一致，最稳定
  */
-import { chromium, type Browser, type BrowserContext, type Page, type BrowserContextOptions } from 'playwright';
-import { parseCookieString } from './sliderSolver.js';
+import { chromium, type Browser, type BrowserContext, type ElementHandle, type Page, type BrowserContextOptions } from 'playwright';
+import { isHeadedDisplayAvailable, parseCookieString } from './sliderSolver.js';
 import {
   isAllowedBrowserNavigationUrl,
-  isProductionLike,
   isSafeBrowserResourceUrl,
   safeErrorType,
   toPublicCrawlerError,
@@ -71,8 +70,7 @@ export async function solveQrLoginInBrowser(
 ): Promise<QrLoginSolveResult> {
   const startTime = Date.now();
   const targetUrl = options.targetUrl || DEFAULT_TARGET_URL;
-  const headless = isProductionLike(process.env.NODE_ENV || process.env.APP_ENV)
-    ? true : options.headless ?? false;
+  const headless = options.headless ?? !isHeadedDisplayAvailable();
   const scanTimeoutMs = options.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT;
   const captureQrImage = options.captureQrImage ?? true;
 
@@ -95,13 +93,7 @@ export async function solveQrLoginInBrowser(
       contextOptions.storageState = { cookies, origins: [] };
     }
 
-    browser = await chromium.launch({
-      headless,
-      chromiumSandbox: true,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-      ],
-    });
+    browser = await launchQrBrowser(headless);
     context = await browser.newContext(contextOptions);
     await guardLoginNavigation(context);
 
@@ -122,7 +114,9 @@ export async function solveQrLoginInBrowser(
     // 未登录：跳转到 login.taobao.com 或显示登录入口
     await page.waitForTimeout(2000);
     const currentUrl = page.url();
-    const isLoggedIn = !isLoginPageUrl(currentUrl) && !(await detectLoginIndicator(page));
+    const isLoggedIn = await hasUsableUnb(context)
+      && !isLoginPageUrl(currentUrl)
+      && !(await detectLoginIndicator(page));
 
     if (isLoggedIn) {
       console.log('[QrLoginSolver] 检测到已登录状态，直接提取 Cookie');
@@ -138,8 +132,9 @@ export async function solveQrLoginInBrowser(
       };
     }
 
-    // === 3. 等待二维码就绪并截图 ===
-    console.log('[QrLoginSolver] 未登录，等待二维码出现');
+    // === 3. 打开登录框并等待二维码就绪 ===
+    console.log('[QrLoginSolver] 未登录，打开登录框并等待二维码出现');
+    await openLoginQr(page);
     let qrImageBytes: Buffer | undefined;
     if (captureQrImage) {
       try {
@@ -167,6 +162,9 @@ export async function solveQrLoginInBrowser(
 
     // === 5. 提取 Cookie ===
     console.log('[QrLoginSolver] 登录成功，提取 Cookie');
+    // 登录后弹出的“保持登录状态”默认 8 秒后选“不保持”，必须主动点“保持”，
+    // 否则会话缺少长期 SSO Cookie，约 30-60 分钟后被判定过期。
+    await clickKeepLoginIfPresent(page);
     // 等待 2 秒让所有 Set-Cookie 完成
     await page.waitForTimeout(2000);
     const cookieStr = await extractCookies(context);
@@ -226,7 +224,8 @@ export async function completeQrLoginSession(
       };
     }
 
-    await page.waitForTimeout(1500);
+    await clickKeepLoginIfPresent(page);
+    await page.waitForTimeout(2000);
     const cookieStr = await extractCookies(context);
     const { unb, mH5Tk } = parseKeyCookies(cookieStr);
     if (!cookieStr || !unb) {
@@ -269,8 +268,7 @@ export async function captureQrCodeOnly(
   options: QrLoginSolveOptions = {}
 ): Promise<{ ok: boolean; qrImageBytes?: Buffer; error?: string; browser?: Browser; context?: BrowserContext; page?: Page }> {
   const targetUrl = options.targetUrl || DEFAULT_TARGET_URL;
-  const headless = isProductionLike(process.env.NODE_ENV || process.env.APP_ENV)
-    ? true : options.headless ?? false;
+  const headless = options.headless ?? !isHeadedDisplayAvailable();
   let browser: Browser | undefined;
   let context: BrowserContext | undefined;
 
@@ -287,13 +285,7 @@ export async function captureQrCodeOnly(
       contextOptions.storageState = { cookies, origins: [] };
     }
 
-    browser = await chromium.launch({
-      headless,
-      chromiumSandbox: true,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-      ],
-    });
+    browser = await launchQrBrowser(headless);
     context = await browser.newContext(contextOptions);
     await guardLoginNavigation(context);
     await context.addInitScript(() => {
@@ -306,13 +298,15 @@ export async function captureQrCodeOnly(
     await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
     await page.waitForTimeout(2000);
 
-    // 检测是否已登录
+    // 以 unb Cookie 判断登录态：闲鱼首页未登录也能正常浏览，
+    // 单看 URL / 页面文案会把"未登录首页"误判成已登录，从而拿不到二维码。
     const currentUrl = page.url();
-    if (!isLoginPageUrl(currentUrl) && !(await detectLoginIndicator(page))) {
-      // 已登录，无需扫码
+    const hasUnb = await hasUsableUnb(context);
+    if (hasUnb && !isLoginPageUrl(currentUrl) && !(await detectLoginIndicator(page))) {
       return { ok: true, browser, context, page };
     }
 
+    await openLoginQr(page);
     const qrImageBytes = await captureQrCodeImage(page);
     return {
       ok: !!qrImageBytes,
@@ -332,6 +326,37 @@ export async function captureQrCodeOnly(
 // ============================================================
 // 内部辅助函数
 // ============================================================
+
+/**
+ * 与 goofish.ts / goofishSearch.ts / sliderSolver.ts 保持一致：
+ * Linux 容器内使用系统 Chrome（channel: 'chrome'），并关闭 Chromium 自带 sandbox，
+ * 否则 AppArmor 会阻止 Chrome sandbox 初始化，或 Playwright 会去找未安装的
+ * chrome-headless-shell。macOS/Windows 仍保持 sandbox 开启。
+ */
+function launchQrBrowser(headless: boolean): Promise<Browser> {
+  const isWindows = process.platform === 'win32';
+  const isLinux = process.platform !== 'win32' && process.platform !== 'darwin';
+  return chromium.launch({
+    headless,
+    chromiumSandbox: !isLinux,
+    ...((isWindows || isLinux) ? { channel: 'chrome' as const } : {}),
+    ignoreDefaultArgs: ['--enable-automation'],
+    args: [
+      '--disable-blink-features=AutomationControlled',
+      ...(isLinux
+        ? [
+            '--no-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-crash-reporter',
+            '--disable-crashpad',
+            '--disable-breakpad',
+            '--disable-features=Crashpad',
+          ]
+        : []),
+    ],
+  });
+}
 
 function isLoginPageUrl(url: string): boolean {
   return (
@@ -375,63 +400,92 @@ async function detectLoginIndicator(page: Page): Promise<boolean> {
   }
 }
 
+async function hasUsableUnb(context: BrowserContext): Promise<boolean> {
+  const cookies = await context.cookies();
+  return cookies.some((c) => c.name === 'unb' && c.value && c.value !== '0');
+}
+
+const QR_ELEMENT_SELECTORS = [
+  '#J_QRCodeImg',
+  '.qrcode-img',
+  '.J_QRCodeImg',
+  'img[src*="qrcode"]',
+  'canvas.qrcode',
+  '#login-qrcode',
+  '.login-qrcode',
+];
+
+async function findVisibleQrElement(page: Page): Promise<ElementHandle | null> {
+  for (const frame of page.frames()) {
+    for (const selector of QR_ELEMENT_SELECTORS) {
+      try {
+        const element = await frame.$(selector);
+        if (element && await element.isVisible()) return element;
+      } catch {
+        // frame 可能正在跳转，继续找下一个
+      }
+    }
+  }
+  return null;
+}
+
 /**
- * 截取二维码区域图片。
+ * 打开闲鱼首页的登录框。
  *
- * 淘宝/闲鱼登录页的二维码通常在 iframe 或 div.qrcode / #J_QRCodeImg 等元素中。
- * 优先按选择器定位，找不到则截取整个页面。
+ * 未登录时 www.goofish.com 仍是可正常浏览的首页，只有点右上角"登录"才会
+ * 加载 passport.goofish.com 的 mini_login iframe，二维码在该 iframe 内。
+ */
+async function openLoginQr(page: Page): Promise<void> {
+  if (await findVisibleQrElement(page)) return;
+
+  await page.evaluate(() => {
+    const candidates = Array.from(
+      document.querySelectorAll<HTMLElement>('a,button,div,span')
+    ).filter((element) => {
+      const text = (element.textContent || '').trim();
+      if (text !== '登录' && text !== '亲，请登录') return false;
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    });
+    const target = candidates.find((element) => element.tagName === 'A') || candidates[0];
+    if (target) target.click();
+  }).catch(() => {
+    // 页面可能正在跳转，交给下面的等待逻辑
+  });
+
+  const deadline = Date.now() + 12000;
+  while (Date.now() < deadline) {
+    if (await findVisibleQrElement(page)) return;
+    await page.waitForTimeout(500);
+  }
+  console.warn(`[QrLoginSolver] 登录框二维码未就绪 url=${page.url()}`);
+}
+
+/**
+ * 截取二维码区域图片。二维码可能在主文档，也可能在 passport 登录 iframe 内。
  */
 async function captureQrCodeImage(page: Page): Promise<Buffer | undefined> {
-  // 选择器列表：从精确到宽泛
-  const qrSelectors = [
-    '#J_QRCodeImg',
-    '.qrcode-img',
-    '.J_QRCodeImg',
-    'img[src*="qrcode"]',
-    'canvas.qrcode',
-    '#login-qrcode',
-    '.login-qrcode',
-    'iframe[src*="login"]', // 部分场景二维码在 iframe 内
-  ];
-
-  // 等待登录页完全渲染
-  await page.waitForTimeout(1500);
-
-  // 先尝试主文档
-  for (const sel of qrSelectors) {
-    try {
-      const el = await page.$(sel);
-      if (el) {
-        // 元素截图，质量更高
-        const buf = await el.screenshot({ type: 'png' });
-        if (buf && buf.length > 0) {
-          console.log(`[QrLoginSolver] 二维码截图成功 selector=${sel}`);
-          return buf;
-        }
-      }
-    } catch (e: any) {
-      // continue
-    }
+  const deadline = Date.now() + 12000;
+  let element: ElementHandle | null = null;
+  while (Date.now() < deadline) {
+    element = await findVisibleQrElement(page);
+    if (element) break;
+    await page.waitForTimeout(500);
+  }
+  if (!element) {
+    console.warn(`[QrLoginSolver] 未找到可见二维码 url=${page.url()}`);
+    return undefined;
   }
 
-  // 尝试 iframe 内查找
-  for (const frame of page.frames()) {
-    for (const sel of qrSelectors) {
-      try {
-        const el = await frame.$(sel);
-        if (el) {
-          const buf = await el.screenshot({ type: 'png' });
-          if (buf && buf.length > 0) {
-            console.log(`[QrLoginSolver] 二维码截图成功（iframe）selector=${sel}`);
-            return buf;
-          }
-        }
-      } catch {
-        // continue
-      }
+  try {
+    const buf = await element.screenshot({ type: 'png' });
+    if (buf && buf.length > 0) {
+      console.log(`[QrLoginSolver] 二维码截图成功 大小=${buf.length} bytes`);
+      return buf;
     }
+  } catch (e: any) {
+    console.warn(`[QrLoginSolver] 二维码截图失败: errorType=${safeErrorType(e)}`);
   }
-
   return undefined;
 }
 
@@ -443,9 +497,30 @@ async function captureQrCodeImage(page: Page): Promise<Buffer | undefined> {
  * 2. 页面包含"我想要/猜你喜欢"等已登录关键词
  * 3. Cookie 中出现 unb 且不为空
  */
+/**
+ * 登录成功后会弹出“保持登录状态”确认框，默认 8 秒后自动选“不保持”。
+ * 主动点击“保持”，让服务端下发长期 SSO Cookie（havana_lgc_exp 等）。
+ */
+async function clickKeepLoginIfPresent(page: Page): Promise<void> {
+  for (const frame of page.frames()) {
+    try {
+      const button = await frame.$('button.keep-login-confirm-btn.primary');
+      if (button && await button.isVisible()) {
+        await button.click({ timeout: 2000 });
+        console.log('[QrLoginSolver] 已点击“保持登录”');
+        await page.waitForTimeout(1200);
+        return;
+      }
+    } catch {
+      // 页面跳转中或按钮已消失，继续下一帧
+    }
+  }
+}
+
 async function waitForLoginSuccess(page: Page, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
+    await clickKeepLoginIfPresent(page);
     try {
       const url = page.url();
       if (!isLoginPageUrl(url) && !(await detectLoginIndicator(page))) {
@@ -453,6 +528,10 @@ async function waitForLoginSuccess(page: Page, timeoutMs: number): Promise<boole
         const cookies = await page.context().cookies();
         const unbCookie = cookies.find((c) => c.name === 'unb');
         if (unbCookie && unbCookie.value && unbCookie.value !== '0') {
+          // 登录成功瞬间“保持登录”弹窗可能刚出现，给页面切换留时间并主动点“保持”。
+          await page.waitForTimeout(1200);
+          await clickKeepLoginIfPresent(page);
+          await page.waitForTimeout(800);
           return true;
         }
       }
@@ -465,15 +544,34 @@ async function waitForLoginSuccess(page: Page, timeoutMs: number): Promise<boole
 }
 
 /**
- * 从 BrowserContext 提取所有 Cookie 并拼接成字符串。
+ * 从 BrowserContext 提取登录态 Cookie 并拼接成字符串。
+ *
+ * 不能只取 goofish.com：淘宝/闲鱼 SSO 的 `_hvn_lgc_`、`havana_lgc_exp` 等
+ * 关键登录 Cookie 可能落在 `.taobao.com` 域。按域优先级去重，goofish 同名
+ * Cookie 优先，避免把无关第三方 Cookie 带进账号。
  */
 async function extractCookies(context: BrowserContext): Promise<string> {
   const cookies = await context.cookies();
-  return cookies
-    .filter((c) => c.name && c.value
-      && (c.domain === 'goofish.com' || c.domain.endsWith('.goofish.com')))
-    .map((c) => `${c.name}=${c.value}`)
-    .join('; ');
+  const selected = cookies
+    .filter((c) => c.name && c.value && authCookieDomainRank(c.domain) >= 0)
+    .sort((a, b) => authCookieDomainRank(a.domain) - authCookieDomainRank(b.domain));
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const cookie of selected) {
+    if (seen.has(cookie.name)) continue;
+    seen.add(cookie.name);
+    parts.push(`${cookie.name}=${cookie.value}`);
+  }
+  return parts.join('; ');
+}
+
+function authCookieDomainRank(domain: string): number {
+  const normalized = domain.toLowerCase().replace(/^\./, '');
+  if (normalized === 'goofish.com' || normalized.endsWith('.goofish.com')) return 0;
+  if (normalized === 'taobao.com' || normalized.endsWith('.taobao.com')) return 1;
+  if (normalized === 'tmall.com' || normalized.endsWith('.tmall.com')) return 2;
+  if (normalized === 'alibaba.com' || normalized.endsWith('.alibaba.com')) return 3;
+  return -1;
 }
 
 /**

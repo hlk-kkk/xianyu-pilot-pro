@@ -2009,7 +2009,9 @@ app.post('/api/qrlogin/capture', async (req, res) => {
       result = await captureQrCodeOnly({
         cookieStr,
         targetUrl: safeTargetUrl,
-        headless: productionLike ? (isHeadedDisplayAvailable() ? false : true) : headless,
+        // 无头 Chrome 打开闲鱼会被判定为"非法访问"，拿不到登录框；
+        // 容器内已有 Xvfb，优先使用有头 Chrome，只有无显示器时才退回请求值。
+        headless: isHeadedDisplayAvailable() ? false : headless,
       });
       if (!result.qrImageBytes || !result.browser || !result.context || !result.page) {
         const error = result.error

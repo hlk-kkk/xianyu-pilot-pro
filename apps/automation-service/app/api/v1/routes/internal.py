@@ -376,6 +376,41 @@ async def internal_qrlogin_cleanup_session(
         return ResultObject.failed("扫码会话清理失败，请稍后重试", code=503)
 
 
+# ---- 发货消息重放：运维在 WS 漏推/历史消息未处理时，用运行中的 WS 进程重试 ----
+@router.post("/delivery/replay/{message_id}")
+async def internal_replay_delivery(
+    message_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(verify_internal_token),
+):
+    try:
+        row = (await db.execute(_text_sql("""
+            SELECT tenant_id, account_id, complete_msg
+            FROM xianyu_chat_message
+            WHERE id = :message_id AND deleted = 0
+            LIMIT 1
+        """), {"message_id": message_id})).mappings().first()
+        if not row:
+            return ResultObject.failed("消息不存在", code=404)
+        msg = row.get("complete_msg")
+        if isinstance(msg, str):
+            msg = json.loads(msg)
+        if not isinstance(msg, dict) or not msg:
+            return ResultObject.failed("消息内容不可用", code=422)
+        from ....services.ws_delivery_handler import handle_incoming_message_for_delivery
+        await handle_incoming_message_for_delivery(
+            int(row["tenant_id"]), int(row["account_id"]), msg
+        )
+        return ResultObject.success({
+            "messageId": message_id,
+            "tenantId": int(row["tenant_id"]),
+            "accountId": int(row["account_id"]),
+        })
+    except Exception:
+        logger.error("internal delivery replay failed", exc_info=True)
+        return ResultObject.failed("重放发货失败，请稍后重试", code=503)
+
+
 # ---- 定时任务执行器 ----
 @router.get("/tasks/due")
 async def internal_due_tasks(

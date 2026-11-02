@@ -814,6 +814,33 @@ async def _infer_missing_session_info(
         logger.warning("推断会话信息失败 tenantId=%d accountId=%d: %s", tenant_id, account_id, exc)
 
 
+def log_duplicate_enabled_accounts(rows: list[dict[str, Any]]) -> int:
+    """Log enabled accounts that share the same Xianyu external UID.
+
+    Competing WebSocket sessions for the same Xianyu account invalidate each
+    other's web session. Start-up must make this visible instead of silently
+    starting both.
+    """
+    duplicates = 0
+    for row in rows:
+        external_uid = str(row.get("external_uid") or row.get("externalUid") or "").strip()
+        try:
+            count = int(row.get("account_count") or row.get("accountCount") or 0)
+        except (TypeError, ValueError):
+            count = 0
+        if not external_uid or count <= 1:
+            continue
+        account_ids = row.get("account_ids") or row.get("accountIds") or ""
+        logger.warning(
+            "检测到重复启用的闲鱼账号: externalUid=%s count=%d accountIds=%s",
+            external_uid,
+            count,
+            account_ids,
+        )
+        duplicates += 1
+    return duplicates
+
+
 async def auto_start_all() -> None:
     """Automatically start WebSocket connections for all logged-in accounts.
 
@@ -851,6 +878,25 @@ async def auto_start_all() -> None:
             await db.commit()
             logger.info("已重置无有效 auth 的残留 ws_status=1 状态（保留有 Cookie 账号的在线状态）")
 
+            duplicate_rows = await db.execute(text("""
+                SELECT
+                    external_uid,
+                    COUNT(*) AS account_count,
+                    GROUP_CONCAT(id ORDER BY id) AS account_ids
+                FROM xianyu_account
+                WHERE deleted = 0
+                  AND status = 1
+                  AND external_uid IS NOT NULL
+                  AND external_uid <> ''
+                GROUP BY external_uid
+                HAVING COUNT(*) > 1
+            """))
+            duplicate_count = log_duplicate_enabled_accounts(
+                [dict(row) for row in duplicate_rows.mappings().all()]
+            )
+            if duplicate_count <= 0:
+                logger.info("未检测到重复启用的闲鱼账号")
+
             rows = await db.execute(text("""
                 SELECT
                     a.id AS account_id,
@@ -873,6 +919,7 @@ async def auto_start_all() -> None:
                     LIMIT 1
                  )
                 WHERE a.deleted = 0
+                  AND a.status = 1
                   AND auth.encrypted_cookie IS NOT NULL
                   AND auth.encrypted_cookie != ''
                 ORDER BY a.id DESC
